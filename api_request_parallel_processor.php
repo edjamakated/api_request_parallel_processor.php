@@ -70,51 +70,52 @@ class APIRequest {
         $this->token_consumption = $token_consumption;
         $this->attempts_left = $attempts_left;
     }
-public function handle_error($reason, $status_tracker, $rate_limiter) {
-    $error_message = $reason->getMessage();
-    $response = $reason->getResponse();
-    if ($response && $response->getStatusCode() === 429) {
-        $status_tracker->num_rate_limit_errors += 1;
-        $status_tracker->time_of_last_rate_limit_error = time();
-        $retry_after = $response->getHeader('Retry-After')[0] ?? 1;
-        sleep($retry_after);
-        $rate_limiter->acquire($this->token_consumption);
-    } elseif ($response) {
-        $status_tracker->num_api_errors += 1;
-    } else {
-        $status_tracker->num_other_errors += 1;
-    }
-}
 
-public function call_api($client, $request_url, $request_header, $status_tracker, $save_filepath, $rate_limiter) {
-    // Start the asynchronous request
-    $promise = $client->postAsync($request_url, [
-        'headers' => $request_header,
-        'json' => $this->request_json
-    ]);
-
-    // Handle the result
-    $promise->then(
-        function ($response) use ($save_filepath, $status_tracker) {
-            $result = json_decode($response->getBody(), true);
-            append_to_jsonl([$this->request_json, $result], $save_filepath);
-            $status_tracker->num_tasks_in_progress -= 1;
-            $status_tracker->num_tasks_succeeded += 1;
-        },
-        function ($reason) use ($status_tracker, $rate_limiter) {
-            // Handle errors
-            $this->handle_error($reason, $status_tracker, $rate_limiter);
-            if ($this->attempts_left > 0) {
-                $this->attempts_left -= 1;
-                $this->call_api($client, $request_url, $request_header, $status_tracker, $save_filepath, $rate_limiter);
-            } else {
-                $status_tracker->num_tasks_in_progress -= 1;
-                $status_tracker->num_tasks_failed += 1;
-            }
+    public function handle_error($reason, $status_tracker, $rate_limiter) {
+        $error_message = $reason->getMessage();
+        $response = $reason->getResponse();
+        if ($response && $response->getStatusCode() === 429) {
+            $status_tracker->num_rate_limit_errors += 1;
+            $status_tracker->time_of_last_rate_limit_error = time();
+            $retry_after = $response->getHeader('Retry-After')[0] ?? 1;
+            sleep($retry_after);
+            $rate_limiter->acquire($this->token_consumption);
+        } elseif ($response) {
+            $status_tracker->num_api_errors += 1;
+        } else {
+            $status_tracker->num_other_errors += 1;
         }
-    );
+    }
+    public function call_api($client, $request_url, $request_header, $status_tracker, $save_filepath, $rate_limiter) {
+        // Start the asynchronous request
+        $promise = $client->postAsync($request_url, [
+            'headers' => $request_header,
+            'json' => $this->request_json
+        ]);
 
-    return $promise;
+        // Handle the result
+        $promise->then(
+            function ($response) use ($save_filepath, $status_tracker) {
+                $result = json_decode($response->getBody(), true);
+                append_to_jsonl([$this->request_json, $result], $save_filepath);
+                $status_tracker->num_tasks_in_progress -= 1;
+                $status_tracker->num_tasks_succeeded += 1;
+            },
+            function ($reason) use ($status_tracker, $rate_limiter) {
+                // Handle errors
+                $this->handle_error($reason, $status_tracker, $rate_limiter);
+                if ($this->attempts_left > 0) {
+                    $this->attempts_left -= 1;
+                    $this->call_api($client, $request_url, $request_header, $status_tracker, $save_filepath, $rate_limiter);
+                } else {
+                    $status_tracker->num_tasks_in_progress -= 1;
+                    $status_tracker->num_tasks_failed += 1;
+                }
+            }
+        );
+
+        return $promise;
+    }
 }
 
 function append_to_jsonl($data, $filepath) {
@@ -122,15 +123,6 @@ function append_to_jsonl($data, $filepath) {
     file_put_contents($filepath, $jsonl, FILE_APPEND);
 }
 
-$params = [
-    'api_key' => 'your_api_key_here',
-    'requests_filepath' => 'requests.txt',
-    'request_url' => 'https://api.example.com/v1/process_text',
-    'save_filepath' => 'results.jsonl',
-    'max_attempts' => 3,
-    'rate_limit_tokens' => 1,
-    'rate_limit_refill_rate' => 0.5
-];
 function process_api_requests_from_file($params) {
     $status_tracker = new StatusTracker();
     $client = new Client();
