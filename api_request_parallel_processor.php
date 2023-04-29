@@ -88,11 +88,25 @@ function process_api_requests_from_file($params) {
     // Read the requests from the file
     $requests = file($params['requests_filepath'], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $promises = [];
+foreach ($requests as $request) {
+    $request_json = json_decode($request, true);
+    $task_id = $status_tracker->num_tasks_started;
+    $status_tracker->num_tasks_started += 1;
+    $status_tracker->num_tasks_in_progress += 1;
 
-    foreach ($requests as $request) {
-        $request_json = json_decode($request, true);
-        $task_id = $status_tracker->num_tasks_started;
-        $status_tracker->num_tasks_started += 1;
-        $status_tracker->num_tasks_in_progress += 1;
+    $api_request = new APIRequest($task_id, $request_json, 0, $params['max_attempts']);
+    $promises[] = $api_request->call_api($client, $params['request_url'], $request_header, $status_tracker, $params['save_filepath']);
+}
 
-        $api_request = new APIRequest($task_id, $request_json, 0, $params['
+// Wait for all requests to complete
+$results = Promise\Utils::settle($promises)->wait();
+
+// ... (handle the results)
+}
+
+// ... (parse command line arguments or use the $params array)
+
+// Call the main function.
+process_api_requests_from_file($params);
+
+?>
